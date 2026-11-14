@@ -11,6 +11,7 @@ import {
 } from '#nu'
 import { type BucketStatus, getReplPool } from '#pool'
 import vars from '#vars'
+import pkg from '../package.json' with { type: 'json' }
 /**
  * nushell-mcp — a Model Context Protocol server for Nushell.
  *
@@ -55,7 +56,7 @@ function renderExec(
   return parts.join('\n')
 }
 
-const server = new McpServer({ name: 'nushell-mcp', version: '0.2.0' })
+const server = new McpServer({ name: pkg.name, version: pkg.version })
 
 // --- nu_exec ---------------------------------------------------------------
 server.registerTool(

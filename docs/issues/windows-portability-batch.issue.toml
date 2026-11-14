@@ -4,7 +4,7 @@ version = '3.0.0'
   name    = 'Windows test-suite portability'
   slug    = 'windows-portability-batch'
   date    = 2026-09-05
-  status  = 'open'
+  status  = 'completed'
   extends = ['docs/issues/include-dirs.issue.toml']
 
   [issue.vision]
@@ -205,14 +205,14 @@ version = '3.0.0'
 [tasks.6]
   id        = 'review-merge'
   target    = 'Review and merge the portability PR.'
-  completed = false
+  completed = 2026-09-10
 
   [[tasks.6.subtasks]]
     synopsis = 'Review the portability PR'
     llm      = 'none'
-    done     = false
+    done     = true
 
   [[tasks.6.subtasks]]
     synopsis = 'Merge the portability PR'
     llm      = 'none'
-    done     = false
+    done     = true
