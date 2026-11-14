@@ -278,6 +278,25 @@ describe('audit regressions', () => {
     expect(r.exitCode).toBe(0)
     expect(r.nuon).toBe('true')
   })
+
+  // Regression: input used to be embedded as a single-quoted nu literal, so
+  // an apostrophe closed it early and the script failed to parse
+  // ("Unclosed delimiter"). It now travels on stdin and is never nu source.
+  test('input survives apostrophes in structured mode', async () => {
+    const tricky = "it's a 'quoted' value, with '# and ''"
+    const r = await runPipeline('$in.text == $in.want', {
+      input: JSON.stringify({ text: tricky, want: tricky }),
+    })
+    expect(r.stderr).toBe('')
+    expect(r.exitCode).toBe(0)
+    expect(r.nuon).toBe('true')
+  })
+
+  test('without input, the structured pipeline receives null', async () => {
+    const r = await runPipeline('$in')
+    expect(r.exitCode).toBe(0)
+    expect(r.resultType).toBe('nothing')
+  })
 })
 
 describe('second-pass audit', () => {

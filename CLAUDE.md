@@ -184,12 +184,13 @@ before spawning when the argv would exceed the Windows 32,767-character cap
 
 ### Script construction invariants (`buildScript`)
 
-The generated nu script reads paths from env vars and snapshots them into
-immutable `let` bindings at script entry, so the user pipeline cannot redirect
-server-controlled reads/writes by mutating `$env`.
+The generated nu script embeds the capture paths as literals, so the user
+pipeline cannot redirect server-controlled writes by mutating `$env`.
+`input` never becomes nu source: it reaches the script on stdin (`nu --stdin`)
+and is parsed as `$in | from nuon`, so its text needs no quoting or escaping.
 The user pipeline runs inside a plain `do { ... }` block (no `--env`) —
 `nu_exec` is stateless, so leaking env mutations out is neither needed nor wanted.
-If you edit `buildScript`, preserve the immutable-path-snapshot property.
+If you edit `buildScript`, preserve both properties.
 
 ### Documentation source
 

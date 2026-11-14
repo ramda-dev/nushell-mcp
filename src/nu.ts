@@ -47,9 +47,10 @@ export interface RunOptions {
   timeoutMs?: number
   /**
    * Input for the code, given as NUON or JSON text (`from nuon` accepts both).
+   * Both modes send it to `nu --stdin`, so it is never embedded in nu source.
    * Structured execution (`runPipeline`) parses it and pipes the value in as
-   * `$in`. Raw execution (`runRaw`) hands the text itself to `nu --stdin`, so
-   * `$in` is that string in every top-level statement; the code parses it.
+   * `$in`. Raw execution (`runRaw`) leaves `$in` as that string in every
+   * top-level statement; the code parses it.
    */
   input?: string
 }
@@ -173,41 +174,38 @@ async function readIfExists(path: string): Promise<string | null> {
   return (await file.exists()) ? file.text() : null
 }
 
-/** Quote a string, by default only if it has whitespace unless `force` is true. */
-function quoted(text: string, force?: true): string {
-  return (force ?? text.match(/\s+/g)) ? `'${text}'` : text
+/** Single-quote a string if it has whitespace. */
+function quoted(text: string): string {
+  return /\s/.test(text) ? `'${text}'` : text
 }
 
 // --- Script construction ---------------------------------------------------
 
 interface ScriptOptions {
   pipeline: string
-  /** When true, the script reads `NU_MCP_INPUT` env var and pipes it as `$in`. */
-  input: string | undefined
+  /** Whether input arrives on stdin; when it does, the script parses it as `$in`. */
+  input: boolean
   /** Temp paths the script saves the final value's NUON and `describe` type to. */
   capture: { nuonPath: string; typePath: string }
 }
 
 /**
- * Build the nu script for one-shot pipeline execution. Two optional features:
+ * Build the nu script for one-shot pipeline execution:
  *
- * 1. Snapshot capture paths into immutable `let`s so the user pipeline cannot
- *    redirect our reads/writes via $env mutation.
- * 2. Run the user pipeline inside `do { }`. Input (if any) flows in as
- *    `$env.NU_MCP_INPUT | from nuon | do { ... }`.
- * 3. (capture) Save `describe` output and best-effort NUON via the snapshotted
- *    paths.
- * 4. Re-emit `$__nu_mcp_value` so nu renders the table to stdout.
- *
- * Paths come from env vars rather than nu string literals because (a) nu has
- * first-class env access (`$env.X`) and (b) it eliminates a quote-injection
- * surface if a temp path ever contained an apostrophe.
+ * 1. Run the user pipeline inside `do { }`. Input, when given, is read from
+ *    stdin (nu runs with `--stdin`) and flows in as `$in | from nuon`, so its
+ *    text never becomes a nu literal and needs no quoting. Without input the
+ *    pipeline receives `null`.
+ * 2. Save best-effort NUON and the `describe` type to the capture paths. Those
+ *    are literals in the script, so mid-pipeline `$env` mutation cannot
+ *    redirect them.
+ * 3. Return the value so nu renders the table to stdout.
  */
-function buildScript({ input = 'null', pipeline, capture }: ScriptOptions): string {
+function buildScript({ input, pipeline, capture }: ScriptOptions): string {
   const { nuonPath, typePath } = capture
   return (
     [
-      `let __value = ${quoted(input, true)} | from nuon | do { ${pipeline} }`,
+      `let __value = ${input ? '$in | from nuon' : 'null'} | do { ${pipeline} }`,
       `for row in [[content path];` +
         `[($__value | to nuon --serialize --raw --raw-strings), ${quoted(nuonPath)}],` +
         `[($__value | describe), ${quoted(typePath)}]` +
@@ -582,12 +580,12 @@ export async function runPipeline(
 
   const { env: layeredEnv, bashRunner } = await layerBashEnv(bashEnv, env, opts.timeoutMs)
   const capture = { nuonPath: fwd(nuonPath), typePath: fwd(typePath) }
-  await Bun.write(scriptPath, buildScript({ pipeline, input, capture }))
+  const hasInput = input !== undefined
+  await Bun.write(scriptPath, buildScript({ pipeline, input: hasInput, capture }))
 
   try {
-    // Capture paths are embedded as literals in the script (see buildScript),
-    // so mid-pipeline $env mutation can't redirect them.
-    const raw = await spawnNu([scriptPath], { ...opts, env: layeredEnv })
+    const argv = hasInput ? ['--stdin', scriptPath] : [scriptPath]
+    const raw = await spawnNu(argv, { ...opts, env: layeredEnv, stdin: input })
     const [nuon, resultType] = await Promise.all([
       readIfExists(nuonPath).then(nuon => nuon?.replace(/\s+$/, '') ?? null),
       readIfExists(typePath).then(type => type?.trim() ?? null),
