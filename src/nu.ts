@@ -46,9 +46,11 @@ export interface RunOptions {
   /** Kill the process after this many ms. Defaults to `DEFAULT_TIMEOUT_MS`. */
   timeoutMs?: number
   /**
-   * Value piped into the pipeline as `$in`, given as NUON or JSON text (`from
-   * nuon` accepts both). Honored in **both** structured execution
-   * (`runPipeline`) and raw execution (`runRaw`).
+   * Input for the code, given as NUON or JSON text (`from nuon` accepts both).
+   * Both modes send it to `nu --stdin`, so it is never embedded in nu source.
+   * Structured execution (`runPipeline`) parses it and pipes the value in as
+   * `$in`. Raw execution (`runRaw`) leaves `$in` as that string in every
+   * top-level statement; the code parses it.
    */
   input?: string
 }
@@ -62,7 +64,16 @@ export interface RawResult {
   timedOut: boolean
 }
 
-export interface PipelineResult extends RawResult {
+export interface ExecResult extends RawResult {
+  /**
+   * Label of the bash runner used for `bashEnv` (e.g. `"wsl"`, `"git-bash"`,
+   * `"bash"`, `"bash (override)"`). `undefined` when no `bashEnv` was
+   * provided for this call.
+   */
+  bashRunner?: string
+}
+
+export interface PipelineResult extends ExecResult {
   /**
    * The pipeline's final value serialized as NUON (Nushell Object Notation)
    * via `to nuon --serialize`. NUON is a concise superset of JSON that also
@@ -75,19 +86,54 @@ export interface PipelineResult extends RawResult {
    * filesize>`. Tells the model the shape of the data at a glance.
    */
   resultType: string | null
-  /**
-   * Label of the bash runner used for `bashEnv` (e.g. `"wsl"`, `"git-bash"`,
-   * `"bash"`, `"bash (override)"`). `undefined` when no `bashEnv` was
-   * provided for this call.
-   */
-  bashRunner?: string
 }
 
 /** Nushell invocation constant to ensure config is always used */
 const NU_COMMAND = [vars.NU_PATH, '--config', vars.CONFIG_PATH] as const
 
+/**
+ * Longest command line `CreateProcess` accepts: 32,767 UTF-16 code units,
+ * terminating NUL included.
+ */
+export const WINDOWS_COMMAND_LINE_MAX = 32_766
+
+/**
+ * Upper bound on the Windows command line built from `argv`: each argument
+ * wrapped in quotes plus a separating space, and every `"` or `\` counted as
+ * escaped. Overcounts backslashes not followed by a quote, which only makes
+ * the guard below conservative.
+ */
+export function windowsCommandLineLength(argv: readonly string[]): number {
+  return argv.reduce((n, arg) => n + arg.length + 3 + (arg.match(/["\\]/g)?.length ?? 0), 0)
+}
+
+/**
+ * Throw an actionable error when `argv` would overflow the Windows command
+ * line. Raw mode passes the user's code as an argument, so a long script hits
+ * this cap where the script-file vehicle of structured mode would not. Other
+ * platforms let the spawn itself fail.
+ */
+export function assertFitsCommandLine(
+  argv: readonly string[],
+  platform: NodeJS.Platform = process.platform
+): void {
+  if (platform !== 'win32') return
+  const length = windowsCommandLineLength(argv)
+  if (length <= WINDOWS_COMMAND_LINE_MAX) return
+  throw new Error(
+    `raw mode passes code on the command line, which Windows caps at ` +
+      `${WINDOWS_COMMAND_LINE_MAX + 1} characters; this call needs about ${length}. ` +
+      'Shorten the code, or use structured mode, which runs it from a script file.'
+  )
+}
+
+/** Spawn options internal to this module; `stdin` is written to nu's stdin. */
+interface SpawnOptions extends Omit<RunOptions, 'input'> {
+  stdin?: string
+}
+
 /** Spawn `nu` with the given argv, collecting stdout/stderr under a timeout. */
-async function spawnNu(argv: string[], opts: RunOptions): Promise<RawResult> {
+async function spawnNu(argv: string[], opts: SpawnOptions): Promise<RawResult> {
   const env = withIncludeDirs(
     withEssentials(opts.cleanEnv ? (opts.env ?? {}) : { ...process.env, ...opts.env }),
     opts.includeDirs ?? []
@@ -96,7 +142,7 @@ async function spawnNu(argv: string[], opts: RunOptions): Promise<RawResult> {
   const proc = Bun.spawn(NU_COMMAND.concat(argv), {
     cwd: opts.cwd,
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [opts.stdin === undefined ? 'ignore' : new Blob([opts.stdin]), 'pipe', 'pipe'],
   })
   addActive(proc, 'exec')
 
@@ -128,55 +174,45 @@ async function readIfExists(path: string): Promise<string | null> {
   return (await file.exists()) ? file.text() : null
 }
 
-/** Quote a string, by default only if it has whitespace unless `force` is true. */
-function quoted(text: string, force?: true): string {
-  return (force ?? text.match(/\s+/g)) ? `'${text}'` : text
+/** Single-quote a string if it has whitespace. */
+function quoted(text: string): string {
+  return /\s/.test(text) ? `'${text}'` : text
 }
 
 // --- Script construction ---------------------------------------------------
 
 interface ScriptOptions {
   pipeline: string
-  /** When true, the script reads `NU_MCP_INPUT` env var and pipes it as `$in`. */
-  input: string | undefined
-  /**
-   * When set, the script saves the pipeline's final value as NUON and its
-   * `describe` type to these temp paths. Omit for "raw" execution that just
-   * runs the pipeline without value capture.
-   */
-  capture?: { nuonPath: string; typePath: string }
+  /** Whether input arrives on stdin; when it does, the script parses it as `$in`. */
+  input: boolean
+  /** Temp paths the script saves the final value's NUON and `describe` type to. */
+  capture: { nuonPath: string; typePath: string }
 }
 
 /**
- * Build the nu script for one-shot pipeline execution. Two optional features:
+ * Build the nu script for one-shot pipeline execution:
  *
- * 1. Snapshot capture paths into immutable `let`s so the user pipeline cannot
- *    redirect our reads/writes via $env mutation.
- * 2. Run the user pipeline inside `do { }`. Input (if any) flows in as
- *    `$env.NU_MCP_INPUT | from nuon | do { ... }`.
- * 3. (capture) Save `describe` output and best-effort NUON via the snapshotted
- *    paths.
- * 4. Re-emit `$__nu_mcp_value` so nu renders the table to stdout.
- *
- * Paths come from env vars rather than nu string literals because (a) nu has
- * first-class env access (`$env.X`) and (b) it eliminates a quote-injection
- * surface if a temp path ever contained an apostrophe.
+ * 1. Run the user pipeline inside `do { }`. Input, when given, is read from
+ *    stdin (nu runs with `--stdin`) and flows in as `$in | from nuon`, so its
+ *    text never becomes a nu literal and needs no quoting. Without input the
+ *    pipeline receives `null`.
+ * 2. Save best-effort NUON and the `describe` type to the capture paths. Those
+ *    are literals in the script, so mid-pipeline `$env` mutation cannot
+ *    redirect them.
+ * 3. Return the value so nu renders the table to stdout.
  */
-function buildScript({ input = 'null', pipeline, capture }: ScriptOptions): string {
-  const lines: string[] = [
-    `let __value = ${quoted(input, true)} | from nuon | do { ${pipeline} }`,
-  ]
-  if (capture) {
-    const { nuonPath, typePath } = capture
-    lines.push(
+function buildScript({ input, pipeline, capture }: ScriptOptions): string {
+  const { nuonPath, typePath } = capture
+  return (
+    [
+      `let __value = ${input ? '$in | from nuon' : 'null'} | do { ${pipeline} }`,
       `for row in [[content path];` +
         `[($__value | to nuon --serialize --raw --raw-strings), ${quoted(nuonPath)}],` +
         `[($__value | describe), ${quoted(typePath)}]` +
-        `] { try { $row.content | save --raw --force $row.path } }`
-    )
-  }
-  lines.push(`return $__value`)
-  return lines.join('; ') + ';'
+        `] { try { $row.content | save --raw --force $row.path } }`,
+      `return $__value`,
+    ].join('; ') + ';'
+  )
 }
 
 // --- Bucket key validation -------------------------------------------------
@@ -481,31 +517,6 @@ export async function loadBashEnv(
 
 // --- Public execution surface ----------------------------------------------
 
-/**
- * Run raw Nushell code via `nu -c`, with no structured-output wrapping. If
- * `opts.input` is provided, the code is wrapped in a minimal `do { }` block
- * that pipes the parsed input as `$in` — preserving raw mode's "no NUON
- * capture" property while still honoring the input parameter.
- */
-export async function runRaw(
-  code: string,
-  { input, env, ...rest }: RunOptions = {}
-): Promise<RawResult> {
-  if (input === undefined) return spawnNu(['--commands', code], { env, ...rest })
-
-  // With input we still avoid the NUON/type wrap, but we have to write a
-  // tiny script: `nu -c` can't both read NU_MCP_INPUT and accept user code
-  // that references `$in` without a wrapper.
-  const id = randomBytes(6).toString('hex')
-  const scriptPath = join(tmpdir(), `nushell-mcp-${id}.nu`)
-  await Bun.write(scriptPath, `${quoted(input, true)} | from nuon | do { ${code} }`)
-  try {
-    return await spawnNu([scriptPath], { env, ...rest })
-  } finally {
-    await unlink(scriptPath).catch(() => {})
-  }
-}
-
 export interface BashBridgeOptions {
   /**
    * Bash script evaluated before the user pipeline runs. Variables it exports
@@ -516,22 +527,49 @@ export interface BashBridgeOptions {
   bashEnv?: string
 }
 
-export interface CaptureOptions {
-  /**
-   * Skip NUON/`describe` capture. The pipeline still runs and its value is
-   * still rendered to stdout, but the returned `nuon` and `resultType` are
-   * `null`. `input` and `bashEnv` are still honored — only the post-pipeline
-   * value-capture wrap is omitted.
-   */
-  noCapture?: boolean
+/** Options shared by both execution modes. */
+export interface ExecOptions extends RunOptions, BashBridgeOptions {}
+
+/**
+ * Resolve the `bashEnv` bridge for one call and layer env from least to most
+ * authoritative: bashEnv-captured vars, then the caller's explicit `env`.
+ */
+async function layerBashEnv(
+  bashEnv: string | undefined,
+  env: Record<string, string> | undefined,
+  timeoutMs: number | undefined
+): Promise<{ env: Record<string, string>; bashRunner?: string }> {
+  if (bashEnv === undefined || bashEnv.length === 0) return { env: { ...env } }
+  const bridge = await loadBashEnv(bashEnv, { timeoutMs })
+  return { env: { ...bridge.vars, ...env }, bashRunner: bridge.runner }
 }
 
-export interface PipelineOptions extends RunOptions, BashBridgeOptions, CaptureOptions {}
+/**
+ * Run raw Nushell code via `nu --commands`: no wrapper, no NUON capture.
+ * The code runs exactly as `nu -c` would run it in a shell, so relative `use`
+ * paths resolve against the effective cwd (the structured wrapper's temp
+ * script resolves them against the temp directory instead).
+ *
+ * `input`, when given, is written to nu's stdin with `--stdin`, so `$in` is
+ * the input *text* in every top-level statement; the code parses it (`$in |
+ * from nuon`). Handing the code a parsed `$in` would mean wrapping it, which
+ * is what raw mode exists to avoid.
+ */
+export async function runRaw(
+  code: string,
+  { input, bashEnv, env, ...rest }: ExecOptions = {}
+): Promise<ExecResult> {
+  const argv = input === undefined ? ['--commands', code] : ['--stdin', '--commands', code]
+  assertFitsCommandLine([...NU_COMMAND, ...argv])
+  const layered = await layerBashEnv(bashEnv, env, rest.timeoutMs)
+  const raw = await spawnNu(argv, { ...rest, env: layered.env, stdin: input })
+  return { ...raw, bashRunner: layered.bashRunner }
+}
 
 /** Run a Nushell pipeline and recover its final value as NUON. */
 export async function runPipeline(
   pipeline: string,
-  { input, bashEnv, noCapture, ...opts }: PipelineOptions = {}
+  { input, bashEnv, env, ...opts }: ExecOptions = {}
 ): Promise<PipelineResult> {
   const id = randomBytes(6).toString('hex')
   const scriptPath = join(tmpdir(), `nushell-mcp-${id}.nu`)
@@ -541,31 +579,14 @@ export async function runPipeline(
   // the single-quoted nu string literal would risk escape-sequence surprises.
   const fwd = (p: string) => p.replaceAll('\\', '/')
 
-  // --- Bash bridge ------------------------------------------------------
-  let bridgeEnv: Record<string, string> = {}
-  let bashRunner: string | undefined
-  if (bashEnv !== undefined && bashEnv.length > 0) {
-    const result = await loadBashEnv(bashEnv, { timeoutMs: opts.timeoutMs })
-    bridgeEnv = result.vars
-    bashRunner = result.runner
-  }
-
-  // --- Compose & write script ------------------------------------------
-  const capture = noCapture
-    ? undefined
-    : { nuonPath: fwd(nuonPath), typePath: fwd(typePath) }
-  await Bun.write(scriptPath, buildScript({ pipeline, input, capture }))
+  const { env: layeredEnv, bashRunner } = await layerBashEnv(bashEnv, env, opts.timeoutMs)
+  const capture = { nuonPath: fwd(nuonPath), typePath: fwd(typePath) }
+  const hasInput = input !== undefined
+  await Bun.write(scriptPath, buildScript({ pipeline, input: hasInput, capture }))
 
   try {
-    const raw = await spawnNu([scriptPath], {
-      ...opts,
-      // Layer env vars from least to most authoritative:
-      //   bashEnv-captured  →  caller's explicit env  →  server-controlled.
-      // Server-controlled capture-paths come last and are snapshotted into
-      // local `let` bindings inside the script (see buildScript), so
-      // mid-pipeline $env mutation can't redirect them.
-      env: { ...bridgeEnv, ...opts.env },
-    })
+    const argv = hasInput ? ['--stdin', scriptPath] : [scriptPath]
+    const raw = await spawnNu(argv, { ...opts, env: layeredEnv, stdin: input })
     const [nuon, resultType] = await Promise.all([
       readIfExists(nuonPath).then(nuon => nuon?.replace(/\s+$/, '') ?? null),
       readIfExists(typePath).then(type => type?.trim() ?? null),

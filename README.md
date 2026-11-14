@@ -50,7 +50,7 @@ A bucket is a long-lived `nu --mcp` child addressed by a name (regex `[A-Za-z0-9
 ## Requirements
 
 - [Bun](https://bun.sh) ≥ 1.3
-- [Nushell](https://www.nushell.sh) on `PATH`, **built with `--features mcp`** (Nushell ≥ 0.112). The REPL pool talks to `nu --mcp` over JSON-RPC; the feature is not in the default build yet. The server **detects and reports the installed version at runtime** — no Nushell version is hardcoded anywhere (see [Versioning](#versioning)).
+- [Nushell](https://www.nushell.sh) on `PATH`, **built with `--features mcp`** (Nushell ≥ 0.117). The REPL pool talks to `nu --mcp` over JSON-RPC; the feature is not in the default build yet. The server **detects and reports the installed version at runtime** — no Nushell version is hardcoded anywhere (see [Versioning](#versioning)).
 
 ## Install
 
@@ -159,7 +159,11 @@ Notation) is used in preference to JSON because it is **more concise** —
 because it **preserves Nushell-native types** that JSON would flatten:
 filesizes, durations, datetimes, and (with `--serialize`) even closures
 survive the round trip. Set `structured: false` to skip the wrapper and run
-raw `nu -c` instead.
+the code as plain `nu -c` instead: `stdout` is all you get back, but a relative
+`use ./module.nu` resolves against `cwd` (in structured mode it resolves against
+the wrapper's temp directory, so reach modules through `includeDirs` there).
+Raw mode passes the code on the command line, which Windows caps at 32,767
+characters; longer code errors with a hint to use structured mode.
 
 ### Feeding data in: the `input` parameter
 
@@ -172,6 +176,10 @@ input:    [{"name": "a", "size": 5}, {"name": "b", "size": 9}]
 pipeline: where size > 6 | get name
 → nuon:   [b]
 ```
+
+In raw mode (`structured: false`) the input reaches the code as text instead:
+`$in` holds the string in every top-level statement, so parse it yourself
+(`$in | from nuon | ...`).
 
 ## On the deferred `explore` integration
 
