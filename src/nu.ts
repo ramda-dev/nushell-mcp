@@ -546,13 +546,14 @@ async function layerBashEnv(
 
 /**
  * Run raw Nushell code via `nu --commands`: no wrapper, no NUON capture.
- * Imports the code makes stay visible to `scope modules` / `scope commands`,
- * and relative `use` paths resolve against the effective cwd.
+ * The code runs exactly as `nu -c` would run it in a shell, so relative `use`
+ * paths resolve against the effective cwd (the structured wrapper's temp
+ * script resolves them against the temp directory instead).
  *
  * `input`, when given, is written to nu's stdin with `--stdin`, so `$in` is
  * the input *text* in every top-level statement; the code parses it (`$in |
- * from nuon`). A parsed `$in` would need a closure around the code, and a
- * closure hides its imports from `scope`.
+ * from nuon`). Handing the code a parsed `$in` would mean wrapping it, which
+ * is what raw mode exists to avoid.
  */
 export async function runRaw(
   code: string,
