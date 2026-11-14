@@ -4,7 +4,7 @@ version = '3.0.0'
   name    = 'Route raw mode through runRaw'
   slug    = 'run-raw-routing'
   date    = 2026-07-16
-  status  = 'open'
+  status  = 'completed'
   extends = ['docs/issues/pathext-omission.issue.toml']
 
   [issue.vision]
@@ -107,79 +107,81 @@ version = '3.0.0'
 [tasks.1]
   id        = 'raw-input-vehicle'
   target    = 'Fix the raw-mode execution vehicle: -c for all raw legs, with an input mechanism that avoids both the do-wrap and the temp-script relative-path breakage.'
-  completed = false
+  completed = 2026-11-14
 
   [[tasks.1.subtasks]]
     synopsis = 'Prototype stdin piping for raw input'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.1.subtasks]]
     synopsis = 'Decide the raw with-input vehicle'
     llm      = 'none'
-    done     = false
+    done     = true
 
   [[tasks.1.subtasks]]
     synopsis = 'Record vehicle decision in MADR draft'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
 [tasks.2]
   id        = 'bashenv-parity'
   target    = 'Hoist the bashEnv bridge out of runPipeline into shared machinery so raw mode keeps bashEnv semantics unchanged.'
-  completed = false
+  completed = 2026-11-14
 
   [[tasks.2.subtasks]]
     synopsis = 'Extract shared bashEnv layering helper'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.2.subtasks]]
     synopsis = 'Wire bridge env into the runRaw path'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.2.subtasks]]
     synopsis = 'Cover raw bashEnv with tests'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
 [tasks.3]
   id        = 'route-raw-mode'
   target    = 'Route nu_exec structured: false through runRaw and update the tool description to the new mode split.'
-  completed = false
+  completed = 2026-11-14
 
+  # Scope stayed visible on nu 0.115+, so the failing test became the
+  # relative-`use` routing test (test/smoke.test.ts, "nu_exec mode routing").
   [[tasks.3.subtasks]]
     synopsis = 'Write failing scope-visibility test'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.3.subtasks]]
     synopsis = 'Switch index.ts routing to runRaw'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.3.subtasks]]
     synopsis = 'Update nu_exec tool description'
     llm      = 'automation'
-    done     = false
+    done     = true
 
 [tasks.4]
   id        = 'guidance-sync'
   target    = 'Reconcile CLAUDE.md and the smoke-test regression coverage with the new routing, replacing the do-not-use-runRaw prohibition.'
-  completed = false
+  completed = 2026-11-14
 
   [[tasks.4.subtasks]]
     synopsis = 'Rewrite CLAUDE.md execution guidance'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.4.subtasks]]
     synopsis = 'Repoint smoke regression at new routing'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.4.subtasks]]
     synopsis = 'Run bun run check clean'
     llm      = 'automation'
-    done     = false
+    done     = true

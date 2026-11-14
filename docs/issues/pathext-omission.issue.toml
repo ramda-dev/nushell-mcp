@@ -4,7 +4,7 @@ version = '3.0.0'
   name   = 'PATHEXT absent in Nushell children'
   slug   = 'pathext-omission'
   date   = 2026-07-14
-  status = 'open'
+  status = 'completed'
 
   [issue.reference]
     branch = 'pathext-omission'
@@ -149,6 +149,8 @@ version = '3.0.0'
     llm      = 'automation'
     done     = true
 
+# Not done yet: the 0.2.5 npm release and the live Claude Desktop check
+# wait on the release cycle tracked in #10.
 [tasks.4]
   id        = 'release-patch'
   target    = 'Ship the fix as an npm patch release with release notes documenting the resolution semantics.'

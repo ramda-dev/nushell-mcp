@@ -4,7 +4,7 @@ version = '3.0.0'
   name    = 'run-based structured wrap'
   slug    = 'run-based-structured-wrap'
   date    = 2026-07-16
-  status  = 'open'
+  status  = 'completed'
   extends = [
     'docs/issues/run-raw-routing.issue.toml',
     'docs/issues/include-dirs.issue.toml',
@@ -100,23 +100,26 @@ version = '3.0.0'
 [tasks.1]
   id        = 'version-gate'
   target    = 'Decide the run-keyword availability strategy: feature-detection via the memoized getNuVersion versus an explicit minimum-version floor.'
-  completed = false
+  completed = 2026-11-14
 
   [[tasks.1.subtasks]]
     synopsis = 'Draft feature-detect and floor options'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
   [[tasks.1.subtasks]]
     synopsis = 'Decide availability strategy'
     llm      = 'none'
-    done     = false
+    done     = true
 
   [[tasks.1.subtasks]]
     synopsis = 'Record decision in MADR draft'
     llm      = 'augmentation'
-    done     = false
+    done     = true
 
+# Not done: #5 narrowed on 2026-11-14. The `run` wrap existed to keep imports
+# visible to `scope`, which nu 0.115 and later already do; the structured-mode
+# change that shipped instead was `input` on stdin (#11).
 [tasks.2]
   id        = 'two-file-wrap'
   target    = 'Rewrite buildScript around run: emit the raw user script plus a wrapper that pipes input and captures NUON/type after the run call.'
@@ -137,6 +140,7 @@ version = '3.0.0'
     llm      = 'augmentation'
     done     = false
 
+# Not done: dropped with tasks.2 when #5 narrowed (see above).
 [tasks.3]
   id        = 'input-binding'
   target    = 'Document and cover the input binding shapes: first pipeline, bare leading command, and def main, with $in unbound in later statements.'
@@ -152,6 +156,7 @@ version = '3.0.0'
     llm      = 'automation'
     done     = false
 
+# Not done: dropped with tasks.2 when #5 narrowed (see above).
 [tasks.4]
   id        = 'isolation-coverage'
   target    = 'Regression coverage proving env and cd mutations inside the user script cannot affect the wrapper capture step.'
