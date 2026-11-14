@@ -173,9 +173,14 @@ drive; the env var is split on the platform separator and keeps the letter.
 written to temp files and read back by the TS layer.
 NUON is preferred over JSON because it preserves Nushell-native types
 (filesizes, durations, datetimes, closures).
-`structured: false` / `noCapture: true` skips this wrap but still routes through
-`runPipeline` so `input` and `bashEnv` keep working — do not shortcut back to
-`runRaw` for those calls (regression covered by `test/smoke.test.ts`).
+`structured: false` skips this wrap and routes to `runRaw` instead, which runs
+the code as plain `nu --commands` (with `--stdin` when `input` is given, so `$in`
+is the input text) and layers `bashEnv` through the same bridge as `runPipeline`.
+Raw mode exists because the wrap changes semantics: a relative `use ./x.nu`
+resolves against the temp-script directory in structured mode, but against
+`cwd` in raw mode. Raw mode passes code on the command line, so `runRaw` errors
+before spawning when the argv would exceed the Windows 32,767-character cap
+(regressions covered by `test/smoke.test.ts`).
 
 ### Script construction invariants (`buildScript`)
 
