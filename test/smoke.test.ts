@@ -1083,6 +1083,7 @@ async function startServer(): Promise<{
     structuredContent: Record<string, unknown>
   }>
   close: () => void
+  serverInfo: { name: string; version: string }
 }> {
   const proc = Bun.spawn(['bun', `${import.meta.dir}/../src/index.ts`], {
     stdin: 'pipe',
@@ -1114,14 +1115,15 @@ async function startServer(): Promise<{
       if (msg.id === id) return msg
     }
   }
-  await request(1, 'initialize', {
+  const init = (await request(1, 'initialize', {
     protocolVersion: '2025-06-18',
     capabilities: {},
     clientInfo: { name: 'smoke', version: '0' },
-  })
+  })) as { result: { serverInfo: { name: string; version: string } } }
   proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
   let nextId = 2
   return {
+    serverInfo: init.result.serverInfo,
     call: async (name, args) =>
       ((await request(nextId++, 'tools/call', { name, arguments: args })) as {
         result: { isError?: boolean; structuredContent: Record<string, unknown> }
@@ -1132,6 +1134,19 @@ async function startServer(): Promise<{
     },
   }
 }
+
+describe('server identity', () => {
+  // The server used to report a hardcoded version that lagged the package.
+  test('initialize reports the name and version from package.json', async () => {
+    const pkg = await Bun.file(`${import.meta.dir}/../package.json`).json()
+    const server = await startServer()
+    try {
+      expect(server.serverInfo).toEqual({ name: pkg.name, version: pkg.version })
+    } finally {
+      server.close()
+    }
+  }, 20_000)
+})
 
 describe('nu_exec mode routing', () => {
   // Pins the mode split at the tool layer: `structured: false` reaches
