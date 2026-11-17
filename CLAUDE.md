@@ -14,8 +14,6 @@ This file provides guidance to Claude Code when working in this repository.
 ```bash
 # install dependencies
 bun install
-# register the nupm modules behind the docs/issues tooling (once per machine; needs nu and $env.NUPM_HOME)
-bun run setup
 # run server over stdio
 bun run start
 # run all project tests
