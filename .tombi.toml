@@ -18,8 +18,3 @@ toml-version = 'v1.1.0'
 [schema]
   enabled = true
   strict  = true
-
-[[schemas]]
-  toml-version = 'v1.1.0'
-  path         = 'https://zaynram.github.io/ramda-doc/schema/issue.schema.json'
-  include      = ['docs/issues/*.toml']
