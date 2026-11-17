@@ -1,8 +1,5 @@
 toml-version = 'v1.1.0'
 
-[files]
-  include = ['.tombi.toml', 'docs/**/*.toml']
-
 [format]
   [format.rules]
     date-time-delimiter             = 'preserve'
