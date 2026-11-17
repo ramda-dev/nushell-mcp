@@ -111,7 +111,7 @@ server.registerTool(
             "the generated script file's location."
         ),
       env: z
-        .record(z.string())
+        .record(z.string(), z.string())
         .optional()
         .describe(
           'Extra environment variables for this call. Layered on top ' +
