@@ -17,7 +17,8 @@
         "dev": "bun --silent run src/index.ts",
         "build": "bun --silent build src/index.ts --target=bun --outdir=dist && cp config/config.nu dist",
         "test": "bun test",
-        "check": "bunx tsc --noEmit && bun test --bail"
+        "check": "bunx tsc --noEmit && bun test --bail",
+        "prepublishOnly": "bun run build"
     },
     "keywords": [
         "mcp",
